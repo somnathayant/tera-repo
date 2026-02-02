@@ -4,77 +4,25 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 }
 
+# ---------------------------
+# AWS Provider (us-east-1)
+# ---------------------------
 provider "aws" {
-  region = "ap-south-1"
-}
-
-# ---------------------------
-# VPC
-# ---------------------------
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true
-
-  tags = {
-    Name = "test-vpc"
-  }
-}
-
-# ---------------------------
-# Public Subnet
-# ---------------------------
-resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  map_public_ip_on_launch = true
-  availability_zone       = "ap-south-1a"
-
-  tags = {
-    Name = "test-public-subnet"
-  }
-}
-
-# ---------------------------
-# Internet Gateway
-# ---------------------------
-resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "test-igw"
-  }
-}
-
-# ---------------------------
-# Route Table
-# ---------------------------
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw.id
-  }
-
-  tags = {
-    Name = "test-public-rt"
-  }
-}
-
-resource "aws_route_table_association" "public_assoc" {
-  subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.public.id
+  region = "us-east-1"
 }
 
 # ---------------------------
 # IAM Role for Lambda
 # ---------------------------
 resource "aws_iam_role" "lambda_role" {
-  name = "test-lambda-role"
+  name = "api-lambda-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -87,65 +35,98 @@ resource "aws_iam_role" "lambda_role" {
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_basic" {
-  role      = aws_iam_role.lambda_role.name
+  role       = aws_iam_role.lambda_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 # ---------------------------
-# Dummy Lambda Package
+# Dummy Lambda package
+# (Replace later with Java JAR)
 # ---------------------------
 data "archive_file" "dummy" {
   type        = "zip"
   output_path = "dummy-lambda.zip"
 
   source {
-    content  = "exports.handler = async () => ({ statusCode: 200, body: 'OK' });"
     filename = "index.js"
+    content  = <<EOF
+exports.handler = async () => {
+  return {
+    statusCode: 200,
+    body: "Hello from Lambda via API Gateway (us-east-1)"
+  };
+};
+EOF
   }
 }
 
 # ---------------------------
 # Lambda Function
 # ---------------------------
-resource "aws_lambda_function" "test_lambda" {
-  function_name = "test-lambda"
+resource "aws_lambda_function" "api_lambda" {
+  function_name = "test-api-lambda"
   role          = aws_iam_role.lambda_role.arn
-  runtime       = "java17" # you will replace code later
-  handler       = "com.example.Handler::handleRequest"
+
+  runtime = "java17"
+  handler = "com.example.Handler::handleRequest"
 
   filename         = data.archive_file.dummy.output_path
   source_code_hash = data.archive_file.dummy.output_base64sha256
 
-  timeout = 30
+  timeout      = 30
   memory_size = 512
-
-  tags = {
-    Name = "test-lambda"
-  }
 }
 
 # ---------------------------
-# PUBLIC Lambda URL (NO AUTH)
+# API Gateway (HTTP API)
 # ---------------------------
-resource "aws_lambda_function_url" "public_url" {
-  function_name      = aws_lambda_function.test_lambda.function_name
-  authorization_type = "NONE"
+resource "aws_apigatewayv2_api" "http_api" {
+  name          = "test-http-api"
+  protocol_type = "HTTP"
 }
 
 # ---------------------------
-# Permission for public invoke
+# Lambda Integration
 # ---------------------------
-resource "aws_lambda_permission" "public_invoke" {
-  statement_id  = "AllowPublicInvoke"
-  action        = "lambda:InvokeFunctionUrl"
-  function_name = aws_lambda_function.test_lambda.function_name
-  principal     = "*"
-  function_url_auth_type = "NONE"
+resource "aws_apigatewayv2_integration" "lambda_integration" {
+  api_id                  = aws_apigatewayv2_api.http_api.id
+  integration_type        = "AWS_PROXY"
+  integration_uri         = aws_lambda_function.api_lambda.invoke_arn
+  payload_format_version = "2.0"
 }
 
 # ---------------------------
-# Output
+# Route (ANY /)
 # ---------------------------
-output "lambda_public_url" {
-  value = aws_lambda_function_url.public_url.function_url
+resource "aws_apigatewayv2_route" "default_route" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "ANY /{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+}
+
+# ---------------------------
+# Stage (AUTO-DEPLOY)
+# ---------------------------
+resource "aws_apigatewayv2_stage" "default_stage" {
+  api_id      = aws_apigatewayv2_api.http_api.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+# ---------------------------
+# Permission for API Gateway
+# ---------------------------
+resource "aws_lambda_permission" "api_gateway_invoke" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+# ---------------------------
+# Output Public URL
+# ---------------------------
+output "api_gateway_url" {
+  value = aws_apigatewayv2_api.http_api.api_endpoint
 }
