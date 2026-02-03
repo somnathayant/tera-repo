@@ -1,3 +1,6 @@
+# ---------------------------
+# AWS first commit check 
+# ---------------------------
 terraform {
   required_providers {
     aws = {
