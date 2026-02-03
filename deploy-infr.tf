@@ -1,10 +1,15 @@
 # ---------------------------
-# AWS first commit check 
-# ---------------------------
-# ---------------------------
-# trigger chk 2
+# Terraform Backend (State Storage)
 # ---------------------------
 terraform {
+
+  backend "s3" {
+    bucket         = "somnathayant-terraform-state-bucket"
+    key            = "lambda-api/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -18,7 +23,7 @@ terraform {
 }
 
 # ---------------------------
-# AWS Provider (us-east-1)
+# AWS Provider
 # ---------------------------
 provider "aws" {
   region = "us-east-1"
@@ -113,7 +118,7 @@ resource "aws_lambda_function" "api_lambda" {
 }
 
 # ---------------------------
-# API Gateway (HTTP API)
+# API Gateway
 # ---------------------------
 resource "aws_apigatewayv2_api" "http_api" {
   name          = "test-http-api"
@@ -124,10 +129,10 @@ resource "aws_apigatewayv2_api" "http_api" {
 # Lambda Integration
 # ---------------------------
 resource "aws_apigatewayv2_integration" "lambda_integration" {
-  api_id                  = aws_apigatewayv2_api.http_api.id
-  integration_type        = "AWS_PROXY"
-  integration_uri         = aws_lambda_function.api_lambda.invoke_arn
-  payload_format_version  = "2.0"
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.api_lambda.invoke_arn
+  payload_format_version = "2.0"
 }
 
 # ---------------------------
@@ -149,7 +154,7 @@ resource "aws_apigatewayv2_stage" "default_stage" {
 }
 
 # ---------------------------
-# Permission for API Gateway
+# Lambda Permission
 # ---------------------------
 resource "aws_lambda_permission" "api_gateway_invoke" {
   statement_id  = "AllowAPIGatewayInvoke"
@@ -160,7 +165,7 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
 }
 
 # ---------------------------
-# Output Public URL
+# Output API URL
 # ---------------------------
 output "api_gateway_url" {
   value = aws_apigatewayv2_api.http_api.api_endpoint
