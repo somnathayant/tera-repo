@@ -34,14 +34,43 @@ resource "aws_iam_role" "lambda_role" {
   })
 }
 
+# ---------------------------
+# Basic Lambda Execution Logs
+# ---------------------------
 resource "aws_iam_role_policy_attachment" "lambda_basic" {
   role       = aws_iam_role.lambda_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 # ---------------------------
+# Custom S3 Access Policy
+# ---------------------------
+resource "aws_iam_role_policy" "lambda_s3_policy" {
+  name = "lambda-s3-access"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::*",
+          "arn:aws:s3:::*/*"
+        ]
+      }
+    ]
+  })
+}
+
+# ---------------------------
 # Dummy Lambda package
-# (Replace later with Java JAR)
 # ---------------------------
 data "archive_file" "dummy" {
   type        = "zip"
@@ -73,7 +102,7 @@ resource "aws_lambda_function" "api_lambda" {
   filename         = data.archive_file.dummy.output_path
   source_code_hash = data.archive_file.dummy.output_base64sha256
 
-  timeout      = 30
+  timeout     = 30
   memory_size = 512
 }
 
@@ -92,11 +121,11 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
   api_id                  = aws_apigatewayv2_api.http_api.id
   integration_type        = "AWS_PROXY"
   integration_uri         = aws_lambda_function.api_lambda.invoke_arn
-  payload_format_version = "2.0"
+  payload_format_version  = "2.0"
 }
 
 # ---------------------------
-# Route (ANY /)
+# Route
 # ---------------------------
 resource "aws_apigatewayv2_route" "default_route" {
   api_id    = aws_apigatewayv2_api.http_api.id
@@ -105,7 +134,7 @@ resource "aws_apigatewayv2_route" "default_route" {
 }
 
 # ---------------------------
-# Stage (AUTO-DEPLOY)
+# Stage
 # ---------------------------
 resource "aws_apigatewayv2_stage" "default_stage" {
   api_id      = aws_apigatewayv2_api.http_api.id
