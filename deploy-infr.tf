@@ -2,7 +2,7 @@
 # AWS first commit check 
 # ---------------------------
 # ---------------------------
-# trigger chk 1
+# trigger chk 2
 # ---------------------------
 terraform {
   required_providers {
